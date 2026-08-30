@@ -1,0 +1,150 @@
+# Task: KuaiRand-Pure Long-View Prediction (Recommender Ranking)
+
+## Objective
+Build a model that ranks videos by the probability a user will "long view" them (`long_view == 1`). This is a **within-user ranking** task: for each user, rank only that user's already-logged impressions by predicted score. You are NOT doing full-catalog retrieval.
+
+**Goal: beat the official FM baseline** (valid primary 0.6016, test primary 0.5946). Higher is better.
+
+## Data (all in the `input/` directory)
+Interaction logs (columns: user_id, video_id, date, hourmin, time_ms, is_click, is_like, is_follow, is_comment, is_forward, is_hate, long_view, play_time_ms, duration_ms, profile_stay_time, comment_stay_time, is_profile_enter, is_rand, tab):
+- `input/log_standard_4_08_to_4_21_pure.csv` — train (date 20220408–20220421)
+- `input/log_standard_4_22_to_5_08_pure.csv` — valid (20220422–20220428) + test (20220429–20220508)
+- `input/log_random_4_22_to_5_08_pure.csv` — random-exposure log (optional, for unbiased validation)
+- `input/user_features_pure.csv`, `input/video_features_basic_pure.csv`, `input/video_features_statistic_pure.csv` — side features
+
+**Label**: `long_view` (0/1). Only this is scored.
+
+## ⚠️ CRITICAL: label leakage — columns you must NOT use as features
+`long_view` is the label you predict. The log also contains OTHER feedback signals from the
+**same impression event**: `is_click`, `is_like`, `is_follow`, `is_comment`, `is_forward`,
+`is_hate`, `play_time_ms`, `profile_stay_time`, `comment_stay_time`, `is_profile_enter`.
+These are **outcomes of the very impression you are scoring** — they happen together with
+`long_view` and are NOT known at prediction time. Using any of them as a feature — raw, derived
+(e.g. `play_time_ratio`, `is_interacted`), or as an auxiliary model's prediction — **leaks the
+label** and produces fake scores (GAUC 0.98+, primary 0.84+, beyond the 0.8645 oracle ceiling).
+The organizers will reject such submissions. Never do this.
+
+You may ONLY use features known BEFORE the impression:
+- `user_id`, `video_id`, `author_id`, `tab`, `duration_ms`, `date`, `hourmin`, `time_ms`;
+- and aggregates computed from **PAST interactions only** (e.g. a video's historical long-view
+  rate up to that point, a user's past click rate). A *historical* statistic is fine; the
+  CURRENT impression's own feedback columns are not.
+
+Note on multi-task (promising direction #3): feedback signals may be used as **auxiliary
+training labels** (a model jointly predicting long_view + is_click shares its embeddings), but
+the is_click value (or any model of it) must NEVER be fed back as an input feature when scoring
+long_view.
+
+## Provided helpers (in `input/`, use them — do NOT reimplement)
+- `input/data.py` — `load(data_dir)` returns `{'train','valid','test'}` split by the official dates; `encode(splits)` returns `(X, y, users)` per split with 5 fields (user_id, video_id, author_id, tab, dur_bucket).
+- **IMPORTANT**: `load()` returns **lists of tuples**, NOT DataFrames. Each row is `(date, user_id, video_id, author_id, tab, duration_ms, long_view)`. To build a submission, use the tuple positions (`row[1]` = user_id, `row[2]` = video_id) or the `users` list from `encode()`. Do NOT write `splits['test']["user_id"]` — that fails because it is a list, not a DataFrame.
+- **`load()` gives you ONLY those 7 fields per row.** It does NOT include `time_ms`, `hourmin`, `is_click`, `is_like`, `is_follow`, etc. Note that `row[5]` is `duration_ms`, NOT `time_ms`. If you need any of those columns (e.g. to order a user's history by real time, or to use `is_click` as a multi-task auxiliary label), read the raw CSV yourself with pandas or csv.
+- `input/evaluate.py` — `evaluate(user_ids, labels, scores)` returns `{'GAUC', 'nDCG@5', 'primary'}`.
+- `input/baseline.py` — the official FM baseline. **Read its `run_fm` function as a complete working example** of load → encode → train → evaluate → predict. Improve on it.
+
+Typical usage:
+```python
+import sys; sys.path.insert(0, 'input')
+from data import load, encode
+from evaluate import evaluate
+splits = load('input')
+enc, dim = encode(splits)
+Xtr, ytr, _ = enc['train']; Xva, yva, uva = enc['valid']; Xte, yte, ute = enc['test']
+# X: int32 (N,5) feature ids; y: float32 labels; u: list of user_id
+# train your model on (Xtr, ytr); predict scores for va and te
+r = evaluate(uva, yva, scores_va)
+print(f"Validation GAUC: {r['GAUC']:.4f}")
+print(f"Validation nDCG@5: {r['nDCG@5']:.4f}")
+print(f"Validation primary: {r['primary']:.4f}")
+```
+
+## Evaluation metric (exactly what `input/evaluate.py` implements)
+- **GAUC**: per-user AUC, weighted by each user's positive count; only users with 0 < positives < impressions are counted.
+- **nDCG@5**: within-user, gain = 2^rel − 1, position discount 1/log2(rank+1); users with zero positives score 0 and ARE included in the average.
+- **primary = (GAUC + nDCG@5) / 2**. Higher is better.
+
+## Required output from your code
+1. Train on the **train** split, compute the metric on the **valid** split, and PRINT it clearly:
+   ```
+   Validation GAUC: 0.XXXX
+   Validation nDCG@5: 0.XXXX
+   Validation primary: 0.XXXX
+   ```
+   The `Validation primary` number is what gets recorded as your score — make it a plain number on its own line.
+2. Generate predictions on the **test** split and write them to `submission/submission.csv` with header `row_id,user_id,video_id,score`:
+   - one row per test row, in the same order as `data.load('input')['test']`
+   - `row_id` = 0-based index; `user_id`/`video_id` = that row's ids; `score` = your model's raw score (only relative order matters, no NaN/Inf).
+
+## Starting point & reference scores (test set, from organizers)
+| model | GAUC | nDCG@5 | primary |
+|---|---|---|---|
+| random (lower bound) | 0.4996 | 0.4511 | 0.4753 |
+| item popularity | 0.6308 | 0.5121 | 0.5715 |
+| **FM (official baseline)** | **0.6610** | **0.5282** | **0.5946** |
+| **AutoInt (AFI) — current best known** | **0.6622** | **0.5299** | **0.5961** ← beat this |
+| oracle ceiling (perfect) | 1.0000 | 0.7289 | 0.8645 |
+
+The ceiling is 0.8645, NOT 1.0 — 27.1% of test users are all-negative (their nDCG is 0 for any model). Judge progress against 0.8645. The current best known is AutoInt (valid primary **0.6032** / test 0.5961) — see the "validated reference" section below.
+
+## Organizer-measured DEAD ENDS (do NOT waste iterations on these)
+- Adding static side features (13 fields incl. music_id/video_type/user coarse buckets): no gain (~0.5940 vs 0.5950).
+- Increasing embedding dim k (8/16/32): almost no change.
+- Pure user-side first-order features contribute **exactly zero** (within-user ranking makes within-user-constant terms irrelevant) — user features only help through cross terms with item features.
+- **D2Co-style watch-time soft labels** (GMM continuous `d2co`/`d2co_lin`, `PCR`, `scale_wt`, relabeled `long_view2`): all score AT OR BELOW the binary `long_view` label on FM and AutoInt (FM 0.6015 → 0.576–0.587; AFI 0.6032 → 0.576–0.602). Reason: `long_view` is itself a duration-threshold function of watch time (≈ play_time > 18s, or a short video fully watched), so the binary label is already aligned with the metric — replacing it only adds noise.
+- **Model ladder on this task** (5 fields, binary label, BCE): AutoInt (0.6032) > FM (0.6015) > NFM ≈ DFM ≈ AFM (0.588–0.590). Other deep / attention variants do not add value over FM in this regime.
+
+## Promising directions (organizer-suggested + team-validated, highest priority first)
+1. **AutoInt + ranking loss** (pairwise BPR or listwise softmax on top of the current BCE).
+   Partial validation: ranking losses helped a DIN baseline reach ~0.60 valid, but never tried on
+   AutoInt (currently at 0.6032) — the most direct way to push past it.
+2. **User behavior sequence modeling** (DIN / SIM / DIEN style). ⭐ **Most promising
+   UNEXPLORED direction.** Current AutoInt has no behavior sequence; adding a time-ordered
+   user history (e.g. via target attention on the recent ~50 videos) on top of the field
+   attention is the single most likely lever. A `DIN` reference implementation is included in
+   `input/din_reference.py` (~0.6017 valid) — you can study it for ideas, but the
+   natural move is to *combine* sequence modeling with AutoInt's field attention.
+3. **Multi-task learning** using other signals (is_click, is_like, is_follow, is_comment, is_forward) as auxiliary training labels for long_view. ⭐ under-tested with AutoInt.
+4. **Temporal features & distribution shift** — the `hourmin` (time-of-day) and `date` columns, and the drift between train (early April) and test (early May).
+5. **Watch-time modeling with censored regression** (CWM). Lower priority: continuous-watch-time labels are a dead end (see Dead Ends); the CWM contribution is the censored-regression form, which is more research-y.
+6. Different architectures (DCN-v2 / xDeepFM / transformer-based) — AutoInt already beats FM/DFM/NFM/AFM, so architecture swaps are lower priority than the two ⭐ directions above.
+7. **Unbiased validation** — `log_random_4_22_to_5_08_pure.csv` is a random-exposure log (~1.2M rows); it can serve as an extra unbiased check against overfitting on the biased recommendation traffic.
+
+## A validated reference (a HIGH STARTING FLOOR, NOT a locked-in answer)
+An **AutoInt (AFI) model with the binary `long_view` label** has been tested and reaches
+**valid primary 0.6032 / test primary 0.5961** (clearly above the official FM baseline 0.6016 /
+0.5946, beyond the baseline's 5-seed std of ~0.0008). Treat it as a strong starting point, but
+you are expected to go BEYOND it — copying it and stopping earns nothing. This is a floor, not
+a ceiling.
+
+Why it works (understand these, then decide your own next step):
+1. **Multi-head self-attention over the 5 fields** (user / video / author / tab / dur_bucket).
+   Each field gets an embedding, all embeddings attend to each other, the flattened attended
+   representation goes through an MLP. This captures **high-order field interactions** that FM
+   (2nd-order only) and DeepFM cannot.
+2. **Binary `long_view` as the label, BCE loss.** Even though the metric is a ranking metric,
+   with a model strong enough at field interaction, plain BCE reaches the same range. The
+   D2Co-style continuous watch-time label has been tested and is *worse* here (long_view is
+   itself a duration-threshold function, so the binary label is already aligned with the metric).
+3. **Train a few epochs with early-stop on `valid primary`** — a converged run, not over-fit.
+
+Directions you are free to explore ON TOP OF (or instead of) this reference:
+- **ranking losses** (listwise softmax / pairwise BPR) on top of AutoInt's BCE — under-tested
+  combination;
+- **user behavior sequence modeling** (DIN / SIM / DIEN style) added to AutoInt's field
+  attention — the big untouched direction;
+- **multi-task heads** (`is_click`, `is_like`, `is_follow` as auxiliary tasks) sharing the
+  field embeddings;
+- continuous features (play_time_ratio, per-user historical long-view rate, video popularity)
+  fed in alongside the field embeddings;
+- deeper/wider AutoInt (more attention layers / heads / larger atten_dim) or completely
+  different architectures (DCN-v2, xDeepFM, transformer-based).
+A full reference implementation is at `input/autoint_reference.py` — read and adapt it if
+helpful. A `DIN` reference is also in `input/din_reference.py` if you want to study the
+sequence-modeling route (it scores ~0.6017 valid / 0.5948 test, lower than AutoInt but it
+combines with AutoInt).
+
+## Constraints
+- Any open-source library is allowed (numpy, pandas, torch, sklearn, lightgbm, ...). CPU is fine — this dataset is small.
+- No external training data — train only on the provided KuaiRand logs.
+- **Keep training fast — finish within ~5 minutes.** The executor kills scripts at ~10 minutes. A 1-epoch ranking-loss model (BPR/DIN) already reaches its peak, so train few epochs and early-stop instead of many epochs. On a Mac, use `torch.device('mps' if torch.backends.mps.is_available() else 'cpu')` for a ~3x speedup; CPU fallback is fine but slower. If a model is still slow, simplify it (smaller embedding, fewer layers) rather than adding epochs.
+- Use the fixed valid split for model selection — do NOT use cross-validation or touch the test labels during training.

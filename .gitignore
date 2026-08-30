@@ -1,0 +1,32 @@
+# === 数据（从 https://kuairand.com 下载，不提交）===
+data/
+input/
+KuaiRand-Pure/
+*.tar.gz
+*.zip
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# === macOS ===
+.DS_Store
+
+# === ML-Master 运行时产物（大文件，不提交）===
+mlmaster/workspaces/
+mlmaster/logs/
+mlmaster/assets/
+mlmaster/dataset/
+
+# === IDE ===
+.idea/
+.vscode/
+
+# === 敏感信息（兜底防御）===
+.env
+*.env
