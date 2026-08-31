@@ -13,9 +13,11 @@ state-of-the-art on MLE-Bench, and adapted it to recommender ranking.
 The agent runs the full loop autonomously. The task is **within-user ranking**: for each user,
 rank only that user's already-logged impressions by the probability of `long_view == 1`. The
 scored metrics are per-user **GAUC** (grouped AUC, weighted by each user's positive count) and
-**nDCG@5** (gain $2^{\text{rel}}-1$, position discount $1/\log_2(k{+}1)$), with
+**nDCG@5** (gain `2^rel - 1`, position discount `1/log2(rank + 1)`), with
 
-$$\text{primary} = \frac{\text{GAUC} + \text{nDCG@5}}{2}.$$
+```
+primary = (GAUC + nDCG@5) / 2
+```
 
 Starting from a hand-written AutoInt/DIN reference, the agent **self-discovered** that the winning
 recipe is not a deep model but a **LightGBM `LambdaRank` ranker + past-only historical aggregate
@@ -23,7 +25,7 @@ features** — per-user / per-video / per-author / per-tab exposure counts, long
 click rates, plus time-of-day and weekend features.
 
 **Final score: val primary 0.6186 / test primary 0.6120**, against the official FM baseline of
-0.6016 / 0.5946 — an absolute test delta of **+0.0174** (≈ 20× the baseline's 5-seed std of
+0.6016 / 0.5946 — an absolute test delta of **+0.0174** (about 20x the baseline's 5-seed std of
 0.0008). The agent found and built this stack itself over 50 autonomous iterations.
 
 ## How we built it
@@ -40,12 +42,9 @@ Three layers on top of ML-Master:
 ## What we learned
 
 - **The ranking loss matters most.** With pointwise BCE the agent got primary ≈ 0.478 (near
-  random); a listwise objective that directly optimizes ranking — $\lambda$-rank, which
-  optimizes NDCG via
-
-  $$\lambda_{ij} = -\sigma\,|Δ\text{NDCG}_{ij}|\cdot\left(1-\frac{1}{1+e^{\sigma(s_i-s_j)}}\right)$$
-
-  — jumped the same signal to 0.6186.
+  random); switching to a listwise ranking objective (LambdaRank, which directly optimizes NDCG
+  by weighting each pair's gradient by the NDCG change it would cause) jumped the same signal to
+  0.6186.
 - **Feature engineering beat model depth here.** AutoInt (self-attention field interaction) and
   DIN (sequence attention) both plateaued below a gradient-boosted ranker fed historical
   statistics, matching the organizers' hint that "the bottleneck is not model capacity".
