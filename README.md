@@ -46,14 +46,14 @@ features). This beat both the organizer's FM baseline and a hand-written AutoInt
 ├── instructions.txt      # task description given to the agent
 ├── helpers/              # official Starter Kit evaluation/data/submit/baseline (unchanged)
 ├── references/           # reference implementations fed to the agent (DIN / AutoInt)
-├── mlmaster/             # the ML-Master agent framework (adapted for macOS + DeepSeek)
+├── mlmaster/             # the ML-Master agent framework (adapted for KuaiRand + DeepSeek)
 ├── ITERATION_LOG.md      # per-iteration log (hypothesis / diff / metric / error-recovery)
 ├── RESULTS_SUMMARY.md    # results table + resource usage report
 ├── ABOUT_PROJECT.md      # Devpost "About the project"
 └── requirements.txt
 ```
 
-The agent framework lives in `mlmaster/` (upstream ML-Master, adapted for macOS + DeepSeek). The
+The agent framework lives in `mlmaster/` (upstream ML-Master, adapted for KuaiRand + DeepSeek). The
 final run's raw logs and best solution are not in this repo (they are large runtime artifacts);
 see `ITERATION_LOG.md` for the extracted per-iteration record.
 
@@ -139,7 +139,7 @@ CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model (see 
 
 ## 5. Team contributions
 
-- **Agent framework & adaptation** — **Nuoyan Xu**: adapted ML-Master to KuaiRand (macOS + DeepSeek),
+- **Agent framework & adaptation** — **Nuoyan Xu**: adapted ML-Master to KuaiRand (DeepSeek),
   wrote the task description, leakage rule, and reference starting point; ran the autonomous loop.
 - **Recommendation modeling & baselines** — **Bohan Shao**: the AutoInt (AFI) reference
   implementation and the D2Co label-ablation study that mapped the dead-ends; independent MLEvolve

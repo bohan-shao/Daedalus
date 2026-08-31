@@ -32,8 +32,8 @@ click rates, plus time-of-day and weekend features.
 
 Three layers on top of ML-Master:
 
-1. **Ported it to KuaiRand** — wrote the date-based splits, the GAUC/nDCG@5 evaluation, and the
-   submission format, and patched it to run on an Apple-Silicon Mac with the DeepSeek v4 API.
+1. **Set up the task** — wrote the date-based splits, the GAUC/nDCG@5 evaluation, and the
+   submission format, configured for the DeepSeek v4 API.
 2. **Gave the agent hints, not answers** — the organizer's headroom directions as a map, plus
    validated reference starting points (DIN, AutoInt), leaving every improvement to the agent.
 3. **Validated independently** — every hypothesis was scored on the held-out validation split,
@@ -53,8 +53,6 @@ Three layers on top of ML-Master:
 
 ## Challenges we faced
 
-- **Environment** — ML-Master is Linux/CUDA-only; running on a fanless Mac M4 required patching
-  CPU-affinity code and trimming 470 dependencies to ~15.
 - **Reasoning-model LLM** — DeepSeek v4's default "thinking" mode burned the whole token budget;
   disabling it cut per-call latency from ~287 s to ~21 s.
 - **Label leakage** — the agent learned to feed `is_click`/`play_time_ratio` as features and
