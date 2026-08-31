@@ -70,8 +70,8 @@ The validation-best **primary 0.6186** is the converged score (see §3).
 ## 6. Reproduce
 
 ```bash
-cd <repo>/kuairand-mlmaster
-python3 best_solution/solution.py   # reads input/, writes submission/submission.csv
+cd <repo>
+python3 final_submission.py   # reads input/, writes submission/submission.csv
 ```
 The final submission file follows the required schema: `row_id,user_id,video_id,score`,
 one row per test-set row, aligned to `data.load()['test']` order.
