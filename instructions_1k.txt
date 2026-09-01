@@ -1,0 +1,126 @@
+# Task: KuaiRand-1K Long-View Prediction (Recommender Ranking)
+
+## Objective
+Build a model that ranks videos by the probability a user will "long view" them (`long_view == 1`). This is a **within-user ranking** task: for each user, rank only that user's already-logged impressions by predicted score. You are NOT doing full-catalog retrieval.
+
+**Goal: beat the official FM baseline** on this 1k-user subset (FM's exact score is NOT
+pre-computed here — the official numpy FM is too slow to run under the executor's time budget).
+Use **item popularity** (valid primary 0.5427 / test 0.5249) as your concrete reference floor:
+a model clearly above it is at FM level or better. Higher is better.
+
+## Dataset: KuaiRand-1K (NOT the full KuaiRand-Pure)
+This run uses **KuaiRand-1K** — a 1,000-user subsample of the KuaiRand dataset, same logs & schema as KuaiRand-Pure but fewer users. The files in `input/` are named `*_pure.csv` for legacy reasons, but they contain the **1k subset**. Key differences vs the full Pure dataset you must account for:
+- ~5.06M train rows (20220408–20220421), ~2.52M valid rows (20220422–20220428), ~4.13M test rows (20220429–20220508); ~1,000 users per split.
+- **Only 5/978 (valid) and 1/997 (test) users are all-negative** — unlike full Pure where 27.1% of test users were. The oracle ceiling here is primary ≈ 0.997 (valid) / 0.999 (test), NOT 0.8645. Judge progress against the FM baseline, not the old Pure ceiling.
+- The 1k users are high-activity (≈4k test impressions/user on average), so per-user metrics are less noisy than the full set's long tail.
+
+## Data (all in the `input/` directory)
+Interaction logs (columns: user_id, video_id, date, hourmin, time_ms, is_click, is_like, is_follow, is_comment, is_forward, is_hate, long_view, play_time_ms, duration_ms, profile_stay_time, comment_stay_time, is_profile_enter, is_rand, tab):
+- `input/log_standard_4_08_to_4_21_pure.csv` — train (date 20220408–20220421)
+- `input/log_standard_4_22_to_5_08_pure.csv` — valid (20220422–20220428) + test (20220429–20220508)
+- `input/log_random_4_22_to_5_08_pure.csv` — random-exposure log (optional, for unbiased validation)
+- `input/user_features_pure.csv`, `input/video_features_basic_pure.csv`, `input/video_features_statistic_pure.csv` — side features
+
+**Label**: `long_view` (0/1). Only this is scored.
+
+## ⚠️ CRITICAL: label leakage — columns you must NOT use as features
+`long_view` is the label you predict. The log also contains OTHER feedback signals from the
+**same impression event**: `is_click`, `is_like`, `is_follow`, `is_comment`, `is_forward`,
+`is_hate`, `play_time_ms`, `profile_stay_time`, `comment_stay_time`, `is_profile_enter`.
+These are **outcomes of the very impression you are scoring** — they happen together with
+`long_view` and are NOT known at prediction time. Using any of them as a feature — raw, derived
+(e.g. `play_time_ratio`, `is_interacted`), or as an auxiliary model's prediction — **leaks the
+label** and produces fake scores (GAUC 0.98+, primary 0.90+, beyond the oracle ceiling).
+The organizers will reject such submissions. Never do this.
+
+You may ONLY use features known BEFORE the impression:
+- `user_id`, `video_id`, `author_id`, `tab`, `duration_ms`, `date`, `hourmin`, `time_ms`;
+- and aggregates computed from **PAST interactions only** (e.g. a video's historical long-view
+  rate up to that point, a user's past click rate). A *historical* statistic is fine; the
+  CURRENT impression's own feedback columns are not.
+
+Note on multi-task (promising direction #3): feedback signals may be used as **auxiliary
+training labels** (a model jointly predicting long_view + is_click shares its embeddings), but
+the is_click value (or any model of it) must NEVER be fed back as an input feature when scoring
+long_view.
+
+## Provided helpers (in `input/`, use them — do NOT reimplement)
+- `input/data.py` — `load(data_dir)` returns `{'train','valid','test'}` split by the official dates; `encode(splits)` returns `(X, y, users)` per split with 5 fields (user_id, video_id, author_id, tab, dur_bucket).
+- **IMPORTANT**: `load()` returns **lists of tuples**, NOT DataFrames. Each row is `(date, user_id, video_id, author_id, tab, duration_ms, long_view)`. To build a submission, use the tuple positions (`row[1]` = user_id, `row[2]` = video_id) or the `users` list from `encode()`. Do NOT write `splits['test']["user_id"]` — that fails because it is a list, not a DataFrame.
+- **`load()` gives you ONLY those 7 fields per row.** It does NOT include `time_ms`, `hourmin`, `is_click`, `is_like`, `is_follow`, etc. Note that `row[5]` is `duration_ms`, NOT `time_ms`. If you need any of those columns (e.g. to order a user's history by real time, or to use `is_click` as a multi-task auxiliary label), read the raw CSV yourself with pandas or csv.
+- `input/evaluate.py` — `evaluate(user_ids, labels, scores)` returns `{'GAUC', 'nDCG@5', 'primary'}`.
+- `input/baseline.py` — the official FM baseline. **Read its `run_fm` function as a complete working example** of load → encode → train → evaluate → predict. Improve on it.
+
+Typical usage:
+```python
+import sys; sys.path.insert(0, 'input')
+from data import load, encode
+from evaluate import evaluate
+splits = load('input')
+enc, dim = encode(splits)
+Xtr, ytr, _ = enc['train']; Xva, yva, uva = enc['valid']; Xte, yte, ute = enc['test']
+# X: int32 (N,5) feature ids; y: float32 labels; u: list of user_id
+# train your model on (Xtr, ytr); predict scores for va and te
+r = evaluate(uva, yva, scores_va)
+print(f"Validation GAUC: {r['GAUC']:.4f}")
+print(f"Validation nDCG@5: {r['nDCG@5']:.4f}")
+print(f"Validation primary: {r['primary']:.4f}")
+```
+
+## Evaluation metric (exactly what `input/evaluate.py` implements)
+- **GAUC**: per-user AUC, weighted by each user's positive count; only users with 0 < positives < impressions are counted.
+- **nDCG@5**: within-user, gain = 2^rel − 1, position discount 1/log2(rank+1); users with zero positives score 0 and ARE included in the average.
+- **primary = (GAUC + nDCG@5) / 2**. Higher is better.
+
+## Required output from your code
+1. Train on the **train** split, compute the metric on the **valid** split, and PRINT it clearly:
+   ```
+   Validation GAUC: 0.XXXX
+   Validation nDCG@5: 0.XXXX
+   Validation primary: 0.XXXX
+   ```
+   The `Validation primary` number is what gets recorded as your score — make it a plain number on its own line.
+2. Generate predictions on the **test** split and write them to `submission/submission.csv` with header `row_id,user_id,video_id,score`:
+   - one row per test row, in the same order as `data.load('input')['test']`
+   - `row_id` = 0-based index; `user_id`/`video_id` = that row's ids; `score` = your model's raw score (only relative order matters, no NaN/Inf).
+
+## Starting point & reference scores — recomputed on this 1k subset
+| model | valid GAUC | valid nDCG@5 | valid primary | test primary |
+|---|---|---|---|---|
+| random (lower bound) | 0.4999 | 0.3668 | 0.4334 | 0.4188 |
+| item popularity | 0.5423 | 0.5430 | 0.5427 | 0.5249 |
+| FM (official baseline) | — | — | — | — |
+| oracle ceiling (perfect) | 1.0000 | 0.9949 | 0.9974 | 0.9995 |
+
+FM's row is intentionally blank: the official numpy FM takes >40 min to train here, far beyond
+the executor's ~10-min budget, so it was not pre-computed. Treat **item popularity (0.5427
+valid)** as the floor and aim to beat it by a clear margin. For context, on the full
+KuaiRand-Pure set: random 0.4753 / pop 0.5715 / FM 0.5946 / ceiling 0.8645 — the numbers on
+this 1k subset are DIFFERENT; trust the table above, not the Pure-era numbers.
+
+## Organizer-measured DEAD ENDS (do NOT waste iterations on these)
+- Adding static side features (13 fields incl. music_id/video_type/user coarse buckets): no gain on the full set; likely the same here.
+- Increasing embedding dim k (8/16/32): almost no change.
+- Pure user-side first-order features contribute **exactly zero** (within-user ranking makes within-user-constant terms irrelevant) — user features only help through cross terms with item features.
+- **D2Co-style watch-time soft labels** (GMM continuous `d2co`/`d2co_lin`, `PCR`, `scale_wt`, relabeled `long_view2`): all score AT OR BELOW the binary `long_view` label. Reason: `long_view` is itself a duration-threshold function of watch time (≈ play_time > 18s, or a short video fully watched), so the binary label is already aligned with the metric — replacing it only adds noise.
+- **Model ladder on the full set** (5 fields, binary label, BCE): AutoInt > FM > NFM ≈ DFM ≈ AFM. Other deep / attention variants do not add value over FM in this regime.
+
+## Promising directions (organizer-suggested + team-validated, highest priority first)
+1. **AutoInt + ranking loss** (pairwise BPR or listwise softmax on top of the current BCE) — the most direct way to push past FM.
+2. **User behavior sequence modeling** (DIN / SIM / DIEN style). ⭐ **Most promising UNEXPLORED direction.** A `DIN` reference implementation is included in `input/din_reference.py` — you can study it for ideas, but the natural move is to *combine* sequence modeling with field attention.
+3. **Multi-task learning** using other signals (is_click, is_like, is_follow, is_comment, is_forward) as auxiliary training labels for long_view. ⭐ under-tested.
+4. **Temporal features & distribution shift** — the `hourmin` (time-of-day) and `date` columns, and the drift between train (early April) and test (early May).
+5. Different architectures (DCN-v2 / xDeepFM / transformer-based) — AutoInt already beats FM/DFM/NFM/AFM, so architecture swaps are lower priority than the two ⭐ directions above.
+6. **Unbiased validation** — `input/log_random_4_22_to_5_08_pure.csv` is a random-exposure log (~43k rows); it can serve as an extra unbiased check against overfitting on the biased recommendation traffic.
+7. **GBDT / LambdaRank is NOT a dead end** — on the full Pure set the winning recipe was a **LightGBM `LambdaRank` ranker + past-only historical aggregates** (per-user / per-video / per-author exposure counts, long-view rates, click rates, time-of-day features), scoring above FM. GBDT feature-engineering is a strong, cheap alternative to the deep directions above.
+
+## Reference implementations (in `input/`, study them)
+- `input/autoint_reference.py` — an AutoInt (AFI) field-attention model; a strong starting floor (beat FM on the full set). Requires torch (installed in this environment).
+- `input/din_reference.py` — a DIN-style target-attention sequence model; slightly below AutoInt on the full set but combinable with it. Requires torch.
+These were validated on the full KuaiRand-Pure set (AutoInt valid primary 0.6032, DIN ~0.6017) — **their absolute scores do NOT transfer to this 1k subset** (different user base), but the architectures and data-loading patterns transfer directly. Copying one of them and stopping earns nothing — you are expected to go BEYOND FM on this 1k subset.
+
+## Constraints
+- Any open-source library is allowed (numpy, pandas, torch, sklearn, lightgbm, ...). CPU is fine — this dataset is small.
+- No external training data — train only on the provided KuaiRand logs.
+- **Keep training fast — finish within ~5 minutes.** The executor kills scripts at ~10 minutes. Train few epochs and early-stop. If a model is slow, simplify it (smaller embedding, fewer layers) rather than adding epochs.
+- Use the fixed valid split for model selection — do NOT use cross-validation or touch the test labels during training.
