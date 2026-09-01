@@ -54,8 +54,7 @@ and capped per-user query groups at LightGBM's 10,000-row hard limit.
 | **Agent** | **0.7148** | **0.8462** | **0.7805** |
 | Δ vs baseline | +0.0418 | +0.2413 | **+0.1415** |
 
-Full details in `1k/RESULTS_SUMMARY_1k.md`. A teammate's parallel GPU run (simpler cumsum features)
-reached test primary 0.6082; the final submission uses the higher 0.7805 result.
+Full details in `1k/RESULTS_SUMMARY_1k.md`.
 
 ### Repository layout
 
@@ -64,7 +63,6 @@ reached test primary 0.6082; the final submission uses the higher 0.7805 result.
 ├── submission/
 │   └── submission.csv    # the final submission (passed official submit.py --check)
 ├── instructions.txt      # task description given to the agent (KuaiRand-Pure)
-├── instructions_1k.txt   # task description for the KuaiRand-1K subset (default in config)
 ├── helpers/              # official Starter Kit evaluation/data/submit/baseline (unchanged)
 ├── references/           # reference implementations fed to the agent (DIN / AutoInt)
 ├── mlmaster/             # the ML-Master agent framework (adapted for KuaiRand + DeepSeek)
@@ -137,12 +135,10 @@ cd mlmaster
 python main_mcts.py agent.steps=50 start_cpu_id=0 cpu_number=8 exp_name=kuairand_afi
 ```
 
-The task description is pointed to by `config_mcts.yaml → desc_file`: the default is the
-KuaiRand-1K prompt (`../instructions_1k.txt`, and `mlmaster/data/` holds the 1k subset);
-use `../instructions.txt` for the full KuaiRand-Pure task. Note: ML-Master is Linux-first; on
-macOS one line in `interpreter/interpreter_parallel.py` (the `os.sched_setaffinity` injection)
-was guarded to skip CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model
-(see `utils/llm_caller.py`).
+The task description is `../instructions.txt` (pointed to by
+`config_mcts.yaml → desc_file`). Note: ML-Master is Linux-first; on macOS one line in
+`interpreter/interpreter_parallel.py` (the `os.sched_setaffinity` injection) was guarded to skip
+CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model (see `utils/llm_caller.py`).
 
 ### 3.3 Bonus benchmark — KuaiRand-1k (reproduce)
 

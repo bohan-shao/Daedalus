@@ -80,9 +80,3 @@ Validate the submission (row alignment verified against the official loader):
 ```bash
 python submit.py --check submission/submission.csv --data_dir <path>/KuaiRand-1K/data --split test
 ```
-
-## 6. Team cross-check
-
-A parallel GPU run by a teammate (LightGBM LambdaRank with simpler cumsum history features) reached
-test GAUC 0.6282 / nDCG@5 0.5881 / primary **0.6082** — below the 1k baseline (0.6390). The final
-bonus submission therefore uses this (higher) result, test primary **0.7805**.
