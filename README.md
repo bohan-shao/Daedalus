@@ -40,22 +40,22 @@ features). This beat both the organizer's FM baseline and a hand-written AutoInt
 | **Agent (test)** | **0.6817** | **0.5423** | **0.6120** |
 | **Δ vs baseline** | **+0.0207** | **+0.0141** | **+0.0174** |
 
-### 1k extension results (KuaiRand-1K)
+### Bonus benchmark — KuaiRand-1k
 
-The same agent was re-run on **KuaiRand-1K** — a 1,000-user subsample of the same logs (same
-schema, ~5.06M train / 2.52M valid / 4.13M test rows). It converged on the same family of
-recipes (LightGBM `LambdaRank` + past-only historical aggregates), and had to chunk per-user
-query groups larger than LightGBM's 10,000-row hard limit. Numbers are on this 1k subset only —
-**not comparable to the Pure numbers above**.
+The same agent was re-run on **KuaiRand-1k** (~983 high-activity users, ~5.06M train / 2.52M valid
+/ 4.13M test rows; same schema as Pure). It kept the LambdaRank objective and enriched the
+historical features with time-decayed statistics, click-history stats, and recent-window features,
+and capped per-user query groups at LightGBM's 10,000-row hard limit.
 
-| | valid GAUC | valid nDCG@5 | valid primary | test primary |
-|---|---|---|---|---|
-| Item popularity (1k floor) | 0.5423 | 0.5430 | 0.5427 | 0.5249 |
-| **Agent (1k)** | **0.6351** | **0.6011** | **0.6181** | **0.6082** |
+| (test) | GAUC | nDCG@5 | primary |
+|---|---|---|---|
+| Item popularity (floor) | — | — | 0.5249 |
+| Official FM baseline | 0.6730 | 0.6049 | 0.6390 |
+| **Agent** | **0.7148** | **0.8462** | **0.7805** |
+| Δ vs baseline | +0.0418 | +0.2413 | **+0.1415** |
 
-The agent's valid primary is **+0.075 over the item-popularity floor**; the test primary 0.6082
-was re-scored offline with `helpers/evaluate.py`. Task description for this run is
-`instructions_1k.txt` (see §3.2).
+Full details in `1k/RESULTS_SUMMARY_1k.md`. A teammate's parallel GPU run (simpler cumsum features)
+reached test primary 0.6082; the final submission uses the higher 0.7805 result.
 
 ### Repository layout
 
@@ -144,19 +144,7 @@ macOS one line in `interpreter/interpreter_parallel.py` (the `os.sched_setaffini
 was guarded to skip CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model
 (see `utils/llm_caller.py`).
 
-### 3.3 Bonus benchmark — KuaiRand-1k
-
-The same agent was run on the optional KuaiRand-1k benchmark (~983 users × thousands of impressions
-each, ~11.7M interactions). It kept the LambdaRank objective and enriched the historical features
-with time-decayed statistics, click-history stats, and recent-window features.
-
-| 1k (test) | GAUC | nDCG@5 | primary |
-|---|---|---|---|
-| Official baseline | 0.6730 | 0.6049 | 0.6390 |
-| **Agent** | **0.7148** | **0.8462** | **0.7805** |
-| Δ vs baseline | +0.0418 | +0.2413 | **+0.1415** |
-
-Reproduce (see `1k/`):
+### 3.3 Bonus benchmark — KuaiRand-1k (reproduce)
 
 ```bash
 cd 1k
