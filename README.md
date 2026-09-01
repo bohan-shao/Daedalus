@@ -37,13 +37,31 @@ features). This beat both the organizer's FM baseline and a hand-written AutoInt
 | **Agent (test)** | **0.6817** | **0.5423** | **0.6120** |
 | **Δ vs baseline** | **+0.0207** | **+0.0141** | **+0.0174** |
 
+### 1k extension results (KuaiRand-1K)
+
+The same agent was re-run on **KuaiRand-1K** — a 1,000-user subsample of the same logs (same
+schema, ~5.06M train / 2.52M valid / 4.13M test rows). It converged on the same family of
+recipes (LightGBM `LambdaRank` + past-only historical aggregates), and had to chunk per-user
+query groups larger than LightGBM's 10,000-row hard limit. Numbers are on this 1k subset only —
+**not comparable to the Pure numbers above**.
+
+| | valid GAUC | valid nDCG@5 | valid primary | test primary |
+|---|---|---|---|---|
+| Item popularity (1k floor) | 0.5423 | 0.5430 | 0.5427 | 0.5249 |
+| **Agent (1k)** | **0.6351** | **0.6011** | **0.6181** | **0.6082** |
+
+The agent's valid primary is **+0.075 over the item-popularity floor**; the test primary 0.6082
+was re-scored offline with `helpers/evaluate.py`. Task description for this run is
+`instructions_1k.txt` (see §3.2).
+
 ### Repository layout
 
 ```
 ├── final_submission.py   # the final pipeline (LightGBM LambdaRank) — generates submission.csv
 ├── submission/
 │   └── submission.csv    # the final submission (passed official submit.py --check)
-├── instructions.txt      # task description given to the agent
+├── instructions.txt      # task description given to the agent (KuaiRand-Pure)
+├── instructions_1k.txt   # task description for the KuaiRand-1K subset (default in config)
 ├── helpers/              # official Starter Kit evaluation/data/submit/baseline (unchanged)
 ├── references/           # reference implementations fed to the agent (DIN / AutoInt)
 ├── mlmaster/             # the ML-Master agent framework (adapted for macOS + DeepSeek)
@@ -111,10 +129,12 @@ cd mlmaster
 python main_mcts.py agent.steps=50 start_cpu_id=0 cpu_number=8 exp_name=kuairand_afi
 ```
 
-The task description is `../instructions.txt` (pointed to by
-`config_mcts.yaml → desc_file`). Note: ML-Master is Linux-first; on macOS one line in
-`interpreter/interpreter_parallel.py` (the `os.sched_setaffinity` injection) was guarded to skip
-CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model (see `utils/llm_caller.py`).
+The task description is pointed to by `config_mcts.yaml → desc_file`: the default is the
+KuaiRand-1K prompt (`../instructions_1k.txt`, and `mlmaster/data/` holds the 1k subset);
+use `../instructions.txt` for the full KuaiRand-Pure task. Note: ML-Master is Linux-first; on
+macOS one line in `interpreter/interpreter_parallel.py` (the `os.sched_setaffinity` injection)
+was guarded to skip CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model
+(see `utils/llm_caller.py`).
 
 ---
 

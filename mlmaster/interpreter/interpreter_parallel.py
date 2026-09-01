@@ -430,10 +430,31 @@ class Interpreter:
         # read all stdout/stderr from child up to the EOF marker
         # waiting until the queue is empty is not enough since
         # the feeder thread in child might still be adding to the queue
-        while not self.result_outq[process_id].empty() or not output or output[-1] != "<|EOF|>":
-            res = self.result_outq[process_id].get()
+        # NOTE: the wait must be bounded — if the child dies abruptly
+        # (e.g. a C-level abort/exit) before sending "<|EOF|>", a bare
+        # queue.get() below would block this loop forever.
+        _eof_deadline = time.time() + 30.0
+        while True:
+            if output and output[-1] == "<|EOF|>":
+                break
+            if time.time() > _eof_deadline:
+                logger.warning("REPL output queue timed out waiting for EOF marker.")
+                break
+            # child is gone and the queue is drained: no EOF will ever arrive
+            if (
+                self.process[process_id] is not None
+                and not self.process[process_id].is_alive()
+                and self.result_outq[process_id].empty()
+            ):
+                break
+            try:
+                res = self.result_outq[process_id].get(timeout=5)
+            except queue.Empty:
+                continue
             output.append(res)
-            
+
+        if not output or output[-1] != "<|EOF|>":
+            output.append("<|EOF|>")  # keep the pop() below well-defined
         output.pop()  # remove the EOF marker
 
         e_cls_name, exc_info, exc_stack = state[1:]
