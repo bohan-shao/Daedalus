@@ -9,6 +9,9 @@ tune → evaluate → reflect & iterate — **on its own**, and converges to a r
 
 > **Final result (hidden-test): GAUC 0.6817 / nDCG@5 0.5423 / primary 0.6120** vs the official
 > baseline **0.5946** — an absolute delta of **+0.0174** (≈ 20× the baseline's 5-seed std of 0.0008).
+>
+> **Bonus (KuaiRand-1k, hidden-test): GAUC 0.7148 / nDCG@5 0.8462 / primary 0.7805** vs baseline
+> **0.6390** — an absolute delta of **+0.1415** (see `1k/`).
 
 ---
 
@@ -47,6 +50,11 @@ features). This beat both the organizer's FM baseline and a hand-written AutoInt
 ├── helpers/              # official Starter Kit evaluation/data/submit/baseline (unchanged)
 ├── references/           # reference implementations fed to the agent (DIN / AutoInt)
 ├── mlmaster/             # the ML-Master agent framework (adapted for KuaiRand + DeepSeek)
+├── 1k/                   # bonus benchmark KuaiRand-1k (submission + pipeline + summary)
+│   ├── submission_1k.csv.gz   # final 1k submission (gzip; gunzip to submission_1k.csv)
+│   ├── final_submission_1k.py # the 1k pipeline (row-order fixed)
+│   ├── RESULTS_SUMMARY_1k.md  # 1k results + delta + resource report
+│   └── instructions_1k.txt    # task description for the 1k run
 ├── ITERATION_LOG.md      # per-iteration log (hypothesis / diff / metric / error-recovery)
 ├── RESULTS_SUMMARY.md    # results table + resource usage report
 ├── ABOUT_PROJECT.md      # Devpost "About the project"
@@ -115,6 +123,30 @@ The task description is `../instructions.txt` (pointed to by
 `config_mcts.yaml → desc_file`). Note: ML-Master is Linux-first; on macOS one line in
 `interpreter/interpreter_parallel.py` (the `os.sched_setaffinity` injection) was guarded to skip
 CPU-pinning, and DeepSeek's reasoning mode was disabled for the code model (see `utils/llm_caller.py`).
+
+### 3.3 Bonus benchmark — KuaiRand-1k
+
+The same agent was run on the optional KuaiRand-1k benchmark (~983 users × thousands of impressions
+each, ~11.7M interactions). It kept the LambdaRank objective and enriched the historical features
+with time-decayed statistics, click-history stats, and recent-window features.
+
+| 1k (test) | GAUC | nDCG@5 | primary |
+|---|---|---|---|
+| Official baseline | 0.6730 | 0.6049 | 0.6390 |
+| **Agent** | **0.7148** | **0.8462** | **0.7805** |
+| Δ vs baseline | +0.0418 | +0.2413 | **+0.1415** |
+
+Reproduce (see `1k/`):
+
+```bash
+cd 1k
+gunzip -k submission_1k.csv.gz        # → submission_1k.csv (the final submission)
+# regenerate the submission from scratch:
+mkdir -p input && cp <KuaiRand-1K>/data/*_1k.csv input/ && cp ../helpers/evaluate.py ../helpers/data.py input/
+python final_submission_1k.py
+```
+
+Full details (deltas, resource report, team cross-check) in `1k/RESULTS_SUMMARY_1k.md`.
 
 ---
 

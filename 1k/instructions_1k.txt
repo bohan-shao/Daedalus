@@ -1,0 +1,94 @@
+# Task: KuaiRand-1k Long-View Prediction (Recommender Ranking)
+
+## Objective
+Build a model that ranks videos by the probability a user will "long view" them (`long_view == 1`). This is a **within-user ranking** task: for each user, rank only that user's already-logged impressions by predicted score. You are NOT doing full-catalog retrieval.
+
+**Goal: beat the official FM baseline** (valid primary 0.6451, test primary 0.6390). Higher is better.
+
+**Official FM baseline on 1k** (reproduced with the starter kit, seed 0): valid GAUC 0.6749 / nDCG@5 0.6153 / primary 0.6451; test GAUC 0.6730 / nDCG@5 0.6049 / primary 0.6390. Beat the test primary 0.6390.
+
+## Data (all in the `input/` directory)
+Interaction logs (columns: user_id, video_id, date, hourmin, time_ms, is_click, is_like, is_follow, is_comment, is_forward, is_hate, long_view, play_time_ms, duration_ms, profile_stay_time, comment_stay_time, is_profile_enter, is_rand, tab):
+- `input/log_standard_4_08_to_4_21_1k.csv` — train (date 20220408–20220421)
+- `input/log_standard_4_22_to_5_08_1k.csv` — valid (20220422–20220428) + test (20220429–20220508)
+- `input/video_features_basic_1k.csv` — video side features (video_id → author_id, etc.)
+
+**Scale**: ~11.7M interactions total (train ~5.06M / valid+test ~6.66M rows) — about 8× the Pure dataset. Manage memory accordingly (avoid loading everything into a DataFrame at once if you can help it; pandas can handle it on a 16GB machine but be mindful).
+
+**Label**: `long_view` (0/1). Only this is scored.
+
+## ⚠️ CRITICAL: label leakage — columns you must NOT use as features
+`long_view` is the label you predict. The log also contains OTHER feedback signals from the
+**same impression event**: `is_click`, `is_like`, `is_follow`, `is_comment`, `is_forward`,
+`is_hate`, `play_time_ms`, `profile_stay_time`, `comment_stay_time`, `is_profile_enter`.
+These are **outcomes of the very impression you are scoring** — they happen together with
+`long_view` and are NOT known at prediction time. Using any of them as a feature — raw, derived
+(e.g. `play_time_ratio`, `is_interacted`), or as an auxiliary model's prediction — **leaks the
+label** and produces fake scores (GAUC 0.98+, primary 0.84+, beyond the 0.8645 oracle ceiling).
+The organizers will reject such submissions. Never do this.
+
+You may ONLY use features known BEFORE the impression:
+- `user_id`, `video_id`, `author_id`, `tab`, `duration_ms`, `date`, `hourmin`, `time_ms`;
+- and aggregates computed from **PAST interactions only** (e.g. a video's historical long-view
+  rate up to that point, a user's past click rate). A *historical* statistic is fine; the
+  CURRENT impression's own feedback columns are not.
+
+## Provided helpers (in `input/`, use them — do NOT reimplement)
+- `input/data.py` — `load(data_dir)` returns `{'train','valid','test'}` split by the official dates; `encode(splits)` returns `(X, y, users)` per split with 5 fields (user_id, video_id, author_id, tab, dur_bucket).
+- **IMPORTANT**: `load()` returns **lists of tuples**, NOT DataFrames. Each row is `(date, user_id, video_id, author_id, tab, duration_ms, long_view)`. To build a submission, use the tuple positions (`row[1]` = user_id, `row[2]` = video_id) or the `users` list from `encode()`. Do NOT write `splits['test']["user_id"]` — that fails because it is a list, not a DataFrame.
+- **`load()` gives you ONLY those 7 fields per row.** It does NOT include `time_ms`, `hourmin`, `is_click`, etc. Note `row[5]` is `duration_ms`, NOT `time_ms`. If you need those columns (e.g. to order history by real time, or `is_click` as an auxiliary label), read the raw CSV yourself with pandas or csv.
+- `input/evaluate.py` — `evaluate(user_ids, labels, scores)` returns `{'GAUC', 'nDCG@5', 'primary'}`.
+- `input/baseline.py` — the official FM baseline. **Read its `run_fm` as a complete working example** of load → encode → train → evaluate → predict. Improve on it.
+
+Typical usage:
+```python
+import sys; sys.path.insert(0, 'input')
+from data import load, encode
+from evaluate import evaluate
+splits = load('input')
+enc, dim = encode(splits)
+Xtr, ytr, _ = enc['train']; Xva, yva, uva = enc['valid']; Xte, yte, ute = enc['test']
+r = evaluate(uva, yva, scores_va)
+print(f"Validation GAUC: {r['GAUC']:.4f}")
+print(f"Validation nDCG@5: {r['nDCG@5']:.4f}")
+print(f"Validation primary: {r['primary']:.4f}")
+```
+
+## Evaluation metric (exactly what `input/evaluate.py` implements)
+- **GAUC**: per-user AUC, weighted by each user's positive count; only users with 0 < positives < impressions counted.
+- **nDCG@5**: within-user, gain = 2^rel − 1, position discount 1/log2(rank+1); zero-positive users score 0 and ARE included.
+- **primary = (GAUC + nDCG@5) / 2**. Higher is better.
+
+## Required output from your code
+1. Train on **train**, compute metric on **valid**, PRINT clearly:
+   ```
+   Validation GAUC: 0.XXXX
+   Validation nDCG@5: 0.XXXX
+   Validation primary: 0.XXXX
+   ```
+   The `Validation primary` number is what gets recorded — a plain number on its own line.
+2. Predict on **test**, write `submission/submission.csv` with header `row_id,user_id,video_id,score`:
+   - one row per test row, in the SAME order as `data.load('input')['test']`
+   - `row_id` = 0-based index; `user_id`/`video_id` = that row's ids; `score` = raw score (relative order only, no NaN/Inf).
+
+## Promising directions (team-validated on KuaiRand-Pure, transfer to 1k)
+These directions were validated on the Pure variant (same schema, same task, smaller scale) and transfer directly:
+1. **LightGBM LambdaRank + past-only historical features** ⭐ — the strongest recipe found on Pure (valid 0.6186 / test 0.6120, clearly above Pure's FM baseline). Build per-entity (`user_id`/`video_id`/`author_id`/`tab`) cumulative *before-current-row* statistics (exposure count, historical long_view rate, historical click rate) plus `duration_ms`, `hour`, `is_weekend`, then train `lightgbm` with `objective=lambdarank` and `ndcg_eval_at=[5]`. This is fast (seconds on Pure) and scales well to 1k.
+2. **Ranking loss beats pointwise BCE** — on Pure, BCE got ~0.478 (near random), while a listwise/pairwise ranking loss reached 0.60+. Always prefer a ranking objective.
+3. **Feature engineering > model depth** — deep models (AutoInt self-attention, DIN sequence) plateaued below the LightGBM ranker on Pure. Historical aggregates matter more than architecture.
+4. **Multi-task / sequence modeling** remain under-explored and are legitimate next levers if you want to go beyond the LightGBM recipe.
+
+## Organizer-measured DEAD ENDS (from the Pure Starter Kit, likely hold for 1k — do NOT waste iterations)
+- Adding static side features (music_id/video_type/user coarse buckets): no gain.
+- Increasing embedding dim: almost no change.
+- Pure user-side first-order features contribute exactly zero (within-user ranking).
+- D2Co-style watch-time soft labels: at or below the binary `long_view` label.
+
+## ⚠️ 1k-specific pitfall (important!)
+Unlike Pure (27K users × ~44 impressions each), **1k has only ~983 users but each has thousands of impressions** (mean 5143, max 49242; 133 users exceed 10000). LightGBM's `lambdarank` has a hard limit of **10000 rows per query (per user)** — passing a user with >10000 rows raises `LightGBMError: Number of rows X exceeds upper limit of 10000 for a query`. When using LambdaRank, **cap each user to their most recent ≤10000 rows for training** (sort by `user_id` + `time_ms`, then `groupby(user_id).tail(10000)`). Evaluate on the full valid split, not the capped one. If a model cannot handle large groups, use a pointwise/pairwise objective instead of listwise.
+
+## Constraints
+- Any open-source library is allowed (numpy, pandas, torch, sklearn, lightgbm, ...). CPU is fine.
+- No external training data — train only on the provided KuaiRand logs.
+- **Keep training fast — the dataset is ~8× Pure, so aim to finish each script within ~15 minutes.** The executor kills scripts at ~30 minutes. LightGBM trains 5M rows in a few minutes — prefer it over slow deep models. Use few epochs and early-stop. If a deep model is slow, simplify it rather than adding epochs.
+- Use the fixed valid split for model selection — do NOT use cross-validation or touch the test labels during training.
